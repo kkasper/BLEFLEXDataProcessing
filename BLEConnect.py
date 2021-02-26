@@ -7,6 +7,7 @@ import pandas as pd
 import os
 import sys
 from os import path
+import time
 import datetime
 import threading
 from datetime import datetime, timedelta
@@ -28,7 +29,7 @@ accel_data = {}
 gyro_data = {}
 figure_shown=0
 lines = []
-DEVICE_NAME = 'GUTRUF LAB v1.BAT_MON'
+DEVICE_NAME = 'GUTRUF LAB v3.BAT_MON'
 LED_PIN = 27
 GRAVITY_EARTH = 9.80665
 BMI2_GYR_RANGE_2000 = 0
@@ -56,7 +57,7 @@ def check_data():
     global gyro_data
     store_data = False
     # Create new dict to populate and convert to data frame
-    packaged_data = {"Time:": [datetime.now()]}
+    packaged_data = {"Time:": [time.time()]}
 
     # Check if the adc data is ready, if so prepend it. Otherwise use empty strings
     if len(adc_data.keys()) > 1:
@@ -135,6 +136,7 @@ def accel_notification_handler(sender, data):
 
 
 def raw_imu_notification_handler(sender, data):
+    print("IMU:",sender,":",data)
     global accel_data
     global gyro_data
     list_of_shorts = list(unpack('h' * (len(data) // 2), data))
@@ -156,13 +158,18 @@ def raw_imu_notification_handler(sender, data):
     check_data()
 
 
+def battery_notification_handler(sender, data):
+    print(sender, ': ',int.from_bytes(data, byteorder='little'))
+    pass
+
+
 async def run(event_loop):
 
     while True:
         address = ''
         try:
             while address == '':
-                devices = await discover(timeout=1)
+                devices = await discover(timeout=2, device="hci0")
                 for d in devices:
                     if d.name != 'Apple, Inc.':
                         # if d.name != "Unknown":
@@ -173,12 +180,12 @@ async def run(event_loop):
                         print('Device found.')
                 print('----')
 
-            async with BleakClient(address, loop=event_loop) as client:
+            async with BleakClient(address, loop=event_loop, device="hci0") as client:
                 x = await client.is_connected()
 
                 disconnected_event = asyncio.Event()
 
-                def disconnect_callback(client, future):
+                def disconnect_callback(client):
                     print("Disconnected callback called!")
                     loop.call_soon_threadsafe(disconnected_event.set)
                     print("Connection lost. Retrying...")
@@ -195,20 +202,21 @@ async def run(event_loop):
                 await client.start_notify('15005991-b131-3396-014c-664c9867b917', adc_notification_handler)
                 # Strain Read
                 await client.start_notify('6eb675ab-8bd1-1b9a-7444-621e52ec6823', adc_notification_handler)
-                # Gyro X
-                await client.start_notify('2c86686a-53dc-25b3-0c4a-f0e10c8dee20', gyro_notification_handler)
-                # Gyro Y
-                await client.start_notify('2c86686a-53dc-25b3-0c4a-f0e10c8dbe21', gyro_notification_handler)
-                # Gyro Z
-                await client.start_notify('2c86686a-53dc-25b3-0c4a-f0e10c8d2e22', gyro_notification_handler)
-                # Accel X
-                await client.start_notify('2c86686a-53dc-25b3-0c4a-f0e10c8d7e23', accel_notification_handler)
-                # Accel Y
-                await client.start_notify('2c86686a-53dc-25b3-0c4a-f0e10c8d4e24', accel_notification_handler)
-                # Accel Z
-                await client.start_notify('2c86686a-53dc-25b3-0c4a-f0e10c8d9e25', accel_notification_handler)
-
-                # Raw IMU
+                # # Gyro X
+                # await client.start_notify('2c86686a-53dc-25b3-0c4a-f0e10c8dee20', gyro_notification_handler)
+                # # Gyro Y
+                # await client.start_notify('2c86686a-53dc-25b3-0c4a-f0e10c8dbe21', gyro_notification_handler)
+                # # Gyro Z
+                # await client.start_notify('2c86686a-53dc-25b3-0c4a-f0e10c8d2e22', gyro_notification_handler)
+                # # Accel X
+                # await client.start_notify('2c86686a-53dc-25b3-0c4a-f0e10c8d7e23', accel_notification_handler)
+                # # Accel Y
+                # await client.start_notify('2c86686a-53dc-25b3-0c4a-f0e10c8d4e24', accel_notification_handler)
+                # # Accel Z
+                # await client.start_notify('2c86686a-53dc-25b3-0c4a-f0e10c8d9e25', accel_notification_handler)
+                # Battery Monitoring
+                await client.start_notify('2c86686a-53dc-25b3-0c4a-f0e10c8dee20', battery_notification_handler)
+                # Raw IMU Data
                 await client.start_notify('2c86686a-53dc-25b3-0c4a-f0e10c8d9e26', raw_imu_notification_handler)
 
                 await disconnected_event.wait()
@@ -216,15 +224,16 @@ async def run(event_loop):
 
                 print("Connected: {0}".format(await client.is_connected()))
 
-        except BleakError:
-            print("Didn't connect in time. Retrying.")
-            pass
+        except BleakError as e:
+            print(e)
+            # print("Didn't connect in time. Retrying.")
 
 
 def create_csv_if_not_exist():
     if not path.exists(DATA_FILE_PATH):
         os.makedirs(DATA_FOLDER_PATH, exist_ok=True)
-        new_file_headers = pd.DataFrame(columns=['Time:', 'Temp Value:', 'Strain Value:'])
+        new_file_headers = pd.DataFrame(columns=['Time:', 'Temp Value:', 'Strain Value:',
+                                                 "Accel_X:", "Accel_Y:", "Accel_Z:", "Gyro_X:", "Gyro_Y:", "Gyro_Z:"])
         new_file_headers.to_csv(DATA_FILE_PATH, encoding='utf-8', index=False)
 
 
