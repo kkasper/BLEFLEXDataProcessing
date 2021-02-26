@@ -1,0 +1,33 @@
+from struct import unpack
+GRAVITY_EARTH = 9.80665
+BMI2_GYR_RANGE_2000 = 0
+BMI2_GYR_RANGE_1000 = 1
+BMI2_GYR_RANGE_500 = 2
+BMI2_GYR_RANGE_250 = 3
+BMI2_GYR_RANGE_125 = 4
+# bit_width = 16
+# g_range = 2
+# dps = 2000
+# queried_data.raw_data[0] = sensor_data[0].sens_data.acc.x;
+# queried_data.raw_data[1] = sensor_data[0].sens_data.acc.y;
+# queried_data.raw_data[2] = sensor_data[0].sens_data.acc.z;
+# queried_data.raw_data[3] = sensor_data[1].sens_data.gyr.x;
+# queried_data.raw_data[4] = sensor_data[1].sens_data.gyr.y;
+# queried_data.raw_data[5] = sensor_data[1].sens_data.gyr.z;
+
+a = b'\x15\xfb\xad\x04\x7c\x3f\x00\x00\xfd\xff\x02\x00'
+b = list(a)
+
+tuple_of_shorts = unpack('h'*(len(a)//2), a)
+
+
+def lsb_to_mps2(val, g_range, bit_width):
+    half_scale = (float((1 << bit_width) / 2.0))
+
+    return (GRAVITY_EARTH * val * g_range) / half_scale
+
+
+def lsb_to_dps(val, dps, bit_width):
+    half_scale = (float((1 << bit_width) / 2.0))
+
+    return (dps / (half_scale + BMI2_GYR_RANGE_2000)) * val

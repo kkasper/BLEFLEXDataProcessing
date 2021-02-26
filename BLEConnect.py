@@ -13,8 +13,9 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 import matplotlib
 import warnings
-import RPi.GPIO as GPIO
+# import RPi.GPIO as GPIO
 import struct
+from struct import unpack
 warnings.simplefilter("ignore", UserWarning)
 sys.coinit_flags = 2
 
@@ -29,8 +30,11 @@ figure_shown=0
 lines = []
 DEVICE_NAME = 'GUTRUF LAB v1.BAT_MON'
 LED_PIN = 27
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(LED_PIN, GPIO.OUT)
+GRAVITY_EARTH = 9.80665
+BMI2_GYR_RANGE_2000 = 0
+
+# GPIO.setmode(GPIO.BCM)
+# GPIO.setup(LED_PIN, GPIO.OUT)
 pin_flash_cycle_duration = 0
 DATA_FILE_PATH = os.path.join(os.path.dirname(__file__), "data/streamed_data.csv")
 DATA_FOLDER_PATH = os.path.join(os.path.dirname(__file__), "data")
@@ -96,17 +100,17 @@ def adc_notification_handler(sender, data):
     global adc_data
     global pin_flash_cycle_duration
     char_name = characteristic_names[sender]
-    if char_name == 'Temperature:':
-        GPIO.output(LED_PIN, 1)
-        pin_flash_cycle_duration += 1
+    # if char_name == 'Temperature:':
+    #     GPIO.output(LED_PIN, 1)
+    #     pin_flash_cycle_duration += 1
 
     print(sender, int.from_bytes(data, byteorder='little'))
     adc_data[char_name] = [int.from_bytes(data, byteorder='little')]
     adc_data[char_name] = [int.from_bytes(data, byteorder='little')]
 
-    if char_name == 'Temperature:' and pin_flash_cycle_duration >= 5:
-        GPIO.output(LED_PIN, 0)
-        pin_flash_cycle_duration = 0
+    # if char_name == 'Temperature:' and pin_flash_cycle_duration >= 5:
+    #     GPIO.output(LED_PIN, 0)
+    #     pin_flash_cycle_duration = 0
 
     if len(adc_data.keys()) > 1:
         print(adc_data)
@@ -130,6 +134,28 @@ def accel_notification_handler(sender, data):
     check_data()
 
 
+def raw_imu_notification_handler(sender, data):
+    global accel_data
+    global gyro_data
+    list_of_shorts = list(unpack('h' * (len(data) // 2), data))
+
+    accel_data = []
+    gyro_data = []
+    for i in range(0, 3):
+        list_of_shorts[i] = (9.80665 * list_of_shorts[i] * 2) / float((1 << 16) / 2.0)
+
+    for i in range(3, 6):
+        list_of_shorts[i] = (2000 / ((float((1 << 16) / 2.0)) + 0)) * list_of_shorts[i]
+
+    accel_data[0] = list_of_shorts[0]
+    accel_data[1] = list_of_shorts[1]
+    accel_data[2] = list_of_shorts[2]
+    gyro_data[0] = list_of_shorts[3]
+    gyro_data[1] = list_of_shorts[4]
+    gyro_data[2] = list_of_shorts[5]
+    check_data()
+
+
 async def run(event_loop):
 
     while True:
@@ -138,7 +164,10 @@ async def run(event_loop):
             while address == '':
                 devices = await discover(timeout=1)
                 for d in devices:
-                    print(d)
+                    if d.name != 'Apple, Inc.':
+                        # if d.name != "Unknown":
+                        print(d)
+
                     if d.name == DEVICE_NAME:
                         address = d.address
                         print('Device found.')
@@ -179,6 +208,9 @@ async def run(event_loop):
                 # Accel Z
                 await client.start_notify('2c86686a-53dc-25b3-0c4a-f0e10c8d9e25', accel_notification_handler)
 
+                # Raw IMU
+                await client.start_notify('2c86686a-53dc-25b3-0c4a-f0e10c8d9e26', raw_imu_notification_handler)
+
                 await disconnected_event.wait()
                 await client.disconnect()
 
@@ -200,7 +232,7 @@ if __name__ == "__main__":
     global handle_desc_pairs
 
     handle_desc_pairs = {}
-    GPIO.output(LED_PIN, 0)
+    # GPIO.output(LED_PIN, 0)
     create_csv_if_not_exist()
 
     loop = asyncio.get_event_loop()
