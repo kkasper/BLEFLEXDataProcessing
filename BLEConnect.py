@@ -44,7 +44,8 @@ characteristic_names = {
 
 if os.name == 'nt':
     # addresses = ["80:EA:CA:70:00:05", "80:EA:CA:70:00:04"]
-    addresses = ["80:EA:CA:70:00:04"]
+    # addresses = ["80:EA:CA:70:00:04"]
+    addresses = ["80:EA:CA:70:00:05"]
 else:
     addresses = []
 
@@ -159,45 +160,44 @@ def raw_imu_notification_handler(sender, data):
     global connected_devices
     if connected_devices == len(address_hashes):
         print("IMU: [", sender, "]:", data)
-
+        new_df = pd.DataFrame
         # Convert raw bytearray into list of processed shorts and then package it for storage
-        # bytearray structure is [Accel X, Accel Y, Accel Z, Gyro X, Gyro Y, Gyro Z, Address Hash]
-        list_of_shorts = list(unpack('h' * (len(data) // 2), data))
-        for i in range(0, 3):
-            list_of_shorts[i] = (9.80665 * list_of_shorts[i] * 2) / (float((1 << 16) / 2.0))
-        for i in range(3, 6):
-            list_of_shorts[i] = (2000 / ((float((1 << 16) / 2.0)) + 0)) * list_of_shorts[i]
+        # bytearray structure is [Accel X, Accel Y, Accel Z, Gyro X, Gyro Y, Gyro Z, Address Hash, Timestamp]
+        for sample_num in range(0, 2):
+            start = 0 + sample_num*18
+            end = 17 + sample_num*18
+            sliced_data = data[start:end]
+            list_of_shorts = list(unpack('h' * (int(len(sliced_data)/2) // 2), sliced_data))
+            for i in range(0, 3):
+                list_of_shorts[i] = (9.80665 * list_of_shorts[i] * 2) / (float((1 << 16) / 2.0))
+            for i in range(3, 6):
+                list_of_shorts[i] = (2000 / ((float((1 << 16) / 2.0)) + 0)) * list_of_shorts[i]
 
-        packaged_data = {"Time:": [time.time()],
-                         "Temperature:": '',
-                         "Strain:": '',
-                         "Battery:": '',
-                         'Accel_X:': list_of_shorts[0],
-                         'Accel_Y:': list_of_shorts[1],
-                         'Accel_Z:': list_of_shorts[2],
-                         'Gyro_X:': list_of_shorts[3],
-                         'Gyro_Y:': list_of_shorts[4],
-                         'Gyro_Z:': list_of_shorts[5]}
+            packaged_data = {"Time:": [time.time()],
+                             "Temperature:": '',
+                             "Strain:": '',
+                             "Battery:": '',
+                             'Accel_X:': list_of_shorts[0],
+                             'Accel_Y:': list_of_shorts[1],
+                             'Accel_Z:': list_of_shorts[2],
+                             'Gyro_X:': list_of_shorts[3],
+                             'Gyro_Y:': list_of_shorts[4],
+                             'Gyro_Z:': list_of_shorts[5]}
 
-        # Convert int16_t to uint16_t
-        list_of_shorts[6] = list_of_shorts[6] + 2**16
-        # Find next device to have this address hash and return that address
-        # print(address_hashes)
-        # print(list_of_shorts[6])
-        list_of_shorts[7] = int.from_bytes((data[-2::] + data[-4:-2:]), "little")
-        print(list_of_shorts[7])
-        # print(list_of_shorts)
+            # Convert int16_t to uint16_t
+            list_of_shorts[6] = list_of_shorts[6] + 2**16
+            # Find next device to have this address hash and return that address
+            # print(address_hashes)
+            # print(list_of_shorts[6])
+            list_of_shorts[7] = int.from_bytes((sliced_data[-2::] + sliced_data[-4:-2:]), "little")
+            print(list_of_shorts[7])
+            # print(list_of_shorts)
+
+            packaged_data["Device Timestamp:"] = list_of_shorts[7]
+            new_df.append(packaged_data)
+
         device_address = next((dev for dev in address_hashes if address_hashes[dev] == list_of_shorts[6]), None)
-
-        packaged_data["Device Timestamp:"] = list_of_shorts[7]
-        # print("[ %x ]" % list_of_shorts[6], end=" ")
-
-        # for val in list_of_shorts:
-        #     print("%.2f" % val, end=" ")
-        # print("]", end=" |||| ")
-
         output_file_name = DATA_FILE_PATH + device_address.replace(":", "_") + ".csv"
-        new_df = pd.DataFrame(packaged_data)
         new_df.to_csv(output_file_name, index=False, header=False, mode='a')
     else:
         pass
