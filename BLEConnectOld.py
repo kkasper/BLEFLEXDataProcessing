@@ -9,7 +9,7 @@ import sys
 from os import path
 import time
 import warnings
-# import RPi.GPIO as GPIO
+import RPi.GPIO as GPIO
 import struct
 from struct import unpack
 warnings.simplefilter("ignore", UserWarning)
@@ -24,8 +24,8 @@ GRAVITY_EARTH = 9.80665
 BMI2_GYR_RANGE_2000 = 0
 NUMBER_OF_READINGS = 20
 
-# GPIO.setmode(GPIO.BCM)
-# GPIO.setup(LED_PIN, GPIO.OUT)
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(LED_PIN, GPIO.OUT)
 pin_flash_cycle_duration = 0
 DATA_FILE_PATH = os.path.join(os.path.dirname(__file__), "data/")
 DATA_FOLDER_PATH = os.path.join(os.path.dirname(__file__), "data")
@@ -41,13 +41,16 @@ characteristic_names = {
      86: 'Battery:'
 }
 
+global output_file_name
+global pin_flash_cycle_number
+
 
 if os.name == 'nt':
     # addresses = ["80:EA:CA:70:00:07","80:EA:CA:70:00:06", "80:EA:CA:70:00:04"]
     addresses = ["80:EA:CA:70:00:11"]
     # addresses = ["80:EA:CA:70:00:07"]
 else:
-    addresses = []
+    addresses = ["80:EA:CA:70:00:11"]
 
 # addresses = ["80:EA:CA:70:00:05"]
 address_hashes = {}
@@ -113,10 +116,19 @@ def store_data_as_csv():
         packaged_data['Accel_Y:'] = ""
         packaged_data['Accel_Z:'] = ""
 
+    global output_file_name
+    global pin_flash_cycle_number
+
     if store_data:
+        pin_flash_cycle_number += 1
+        if pin_flash_cycle_number > 200:
+            GPIO.output(LED_PIN, 1)
+            if pin_flash_cycle_number > 210:
+                pin_flash_cycle_number = 0
+                GPIO.output(LED_PIN, 0)
         print(packaged_data)
         # Create dataframe from packaged data disc and write to CSV file
-        output_file_name = DATA_FILE_PATH + address.replace(":", "_") + ".csv"
+        # output_file_name = DATA_FILE_PATH + address.replace(":", "_") + ".csv"
         new_df = pd.DataFrame(packaged_data)
         new_df.to_csv(output_file_name,
                       index=False,
@@ -226,6 +238,7 @@ async def connect_to_device(event_loop, address):
                     print(d)
 
             async with BleakClient(address, loop=event_loop) as client:
+                GPIO.output(LED_PIN, 0)
                 x = await client.is_connected()
                 connected_devices += 1
                 print("Connected to " + str(connected_devices) + " devices out of " + str(len(address_hashes)) + ".")
@@ -235,6 +248,7 @@ async def connect_to_device(event_loop, address):
 
                 def disconnect_callback(client):
                     global connected_devices
+                    GPIO.output(LED_PIN, 1)
                     print("Disconnected callback called!")
                     connected_devices -= 1
                     loop.call_soon_threadsafe(disconnected_event.set)
@@ -250,20 +264,20 @@ async def connect_to_device(event_loop, address):
                         # characteristic_names[char.handle] = (char.description + ':')
                 # Temp Read
 
-                # await client.start_notify('15005991-b131-3396-014c-664c9867b917', adc_notification_handler)
+                await client.start_notify('15005991-b131-3396-014c-664c9867b917', adc_notification_handler)
                 # Strain Read
-                # await client.start_notify('6eb675ab-8bd1-1b9a-7444-621e52ec6823', adc_notification_handler)
+                await client.start_notify('6eb675ab-8bd1-1b9a-7444-621e52ec6823', adc_notification_handler)
                 # Battery Monitoring
-                # await client.start_notify('1587686a-53dc-25b3-0c4a-f0e10c8dee20', adc_notification_handler)
+                await client.start_notify('1587686a-53dc-25b3-0c4a-f0e10c8dee20', adc_notification_handler)
 
                 # Raw IMU Data
-                await client.start_notify('2c86686a-53dc-25b3-0c4a-f0e10c8d9e26', gait_notification_handler)
+                # await client.start_notify('2c86686a-53dc-25b3-0c4a-f0e10c8d9e26', gait_notification_handler)
 
                 await disconnected_event.wait()
                 await client.disconnect()
 
                 print("Connected: {0}".format(await client.is_connected()))
-        except asyncio.exceptions.TimeoutError as e:
+        except Exception:
             print("Didn't connect to " + address + " in time.")
 
         except BleakError as e:
@@ -272,6 +286,7 @@ async def connect_to_device(event_loop, address):
 
 
 def create_csv_if_not_exist(filename_address):
+    global output_file_name
     output_file_name = DATA_FILE_PATH + filename_address.replace(":", "_") + ".csv"
     if not path.exists(output_file_name):
         os.makedirs(DATA_FOLDER_PATH, exist_ok=True)
@@ -297,10 +312,12 @@ if __name__ == "__main__":
     # GPIO.output(LED_PIN, 0)
     for address in addresses:
         create_csv_if_not_exist(address)
-
+    global pin_flash_cycle_number
+    pin_flash_cycle_number = 0
     print(address_hashes)
     # print(address_filePaths)
     # error catch`
+    GPIO.output(LED_PIN, 1)
 
     try:
         loop = asyncio.get_event_loop()
